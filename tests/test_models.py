@@ -2,7 +2,12 @@ import pytest
 import torch
 from transformers import Wav2Vec2Model
 
-from compact_ser.losses import distillation_loss, hidden_state_loss, multitask_loss
+from compact_ser.losses import (
+    distillation_loss,
+    hidden_state_loss,
+    multitask_loss,
+    transcript_loss,
+)
 from compact_ser.models import (
     SpeechEmotionModel,
     build_student,
@@ -154,3 +159,11 @@ def test_distillation_updates_only_the_student(encoder, batch):
     assert torch.isfinite(loss)
     assert student.emotion_head.weight.grad is not None
     assert teacher.emotion_head.weight.grad is None
+
+
+def test_transcript_loss_accepts_an_empty_transcript(encoder, batch):
+    model = SpeechEmotionModel(encoder, NUM_EMOTIONS, vocabulary_size=8)
+    output = model(*batch)
+    targets = torch.tensor([[1, 2], [0, 0]])
+    loss = transcript_loss(output, targets, torch.tensor([2, 0]))
+    assert torch.isfinite(loss)

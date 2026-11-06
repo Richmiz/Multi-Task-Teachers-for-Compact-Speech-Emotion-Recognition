@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 import torch
 import torch.nn.functional as functional
@@ -43,7 +44,7 @@ def transcript_loss(
     )
 
 
-def multitask_loss(
+def multitask_loss_terms(
     output: SpeechModelOutput,
     emotion_labels: torch.Tensor,
     transcript_targets: torch.Tensor | None = None,
@@ -51,8 +52,9 @@ def multitask_loss(
     speaker_labels: torch.Tensor | None = None,
     transcript_weight: float = 0.0,
     speaker_weight: float = 0.0,
-) -> torch.Tensor:
-    """Combine the emotion loss with any active auxiliary losses.
+    class_weights: torch.Tensor | None = None,
+) -> dict[str, torch.Tensor]:
+    """Compute the weighted emotion loss and any active auxiliary losses.
 
     Args:
         output: Model outputs for the batch.
@@ -62,20 +64,30 @@ def multitask_loss(
         speaker_labels: Speaker class indices.
         transcript_weight: Weight of the speech recognition loss.
         speaker_weight: Weight of the speaker identification loss.
+        class_weights: Weight of each emotion class.
 
     Returns:
-        The weighted total loss.
+        The loss terms by name.
     """
-    loss = functional.cross_entropy(output.emotion_logits, emotion_labels)
+    terms = {
+        "emotion": functional.cross_entropy(
+            output.emotion_logits, emotion_labels, weight=class_weights
+        )
+    }
     if transcript_weight > 0.0:
-        loss = loss + transcript_weight * transcript_loss(
+        terms["transcript"] = transcript_weight * transcript_loss(
             output, transcript_targets, transcript_lengths
         )
     if speaker_weight > 0.0:
-        loss = loss + speaker_weight * functional.cross_entropy(
+        terms["speaker"] = speaker_weight * functional.cross_entropy(
             output.speaker_logits, speaker_labels
         )
-    return loss
+    return terms
+
+
+def multitask_loss(output: SpeechModelOutput, *args: Any, **kwargs: Any) -> torch.Tensor:
+    """Return the sum of the terms from `multitask_loss_terms`."""
+    return sum(multitask_loss_terms(output, *args, **kwargs).values())
 
 
 def hidden_state_loss(
@@ -104,7 +116,7 @@ def hidden_state_loss(
     return total / len(teacher_layers)
 
 
-def distillation_loss(
+def distillation_loss_terms(
     student_output: SpeechModelOutput,
     teacher_output: SpeechModelOutput,
     teacher_layers: Sequence[int],
@@ -112,8 +124,9 @@ def distillation_loss(
     temperature: float,
     logit_weight: float,
     hidden_state_weight: float,
-) -> torch.Tensor:
-    """Combine cross-entropy, temperature-scaled KL divergence, and hidden-state error.
+    class_weights: torch.Tensor | None = None,
+) -> dict[str, torch.Tensor]:
+    """Compute cross-entropy, temperature-scaled KL divergence, and hidden-state error.
 
     Args:
         student_output: Student outputs, including hidden states.
@@ -123,11 +136,11 @@ def distillation_loss(
         temperature: Softening temperature for the emotion logits.
         logit_weight: Weight of the KL divergence.
         hidden_state_weight: Weight of the hidden-state error.
+        class_weights: Weight of each emotion class.
 
     Returns:
-        The weighted total loss.
+        The loss terms by name.
     """
-    supervised = functional.cross_entropy(student_output.emotion_logits, emotion_labels)
     soft_targets = (teacher_output.emotion_logits / temperature).softmax(dim=-1)
     soft_predictions = (student_output.emotion_logits / temperature).log_softmax(dim=-1)
     logit_term = functional.kl_div(soft_predictions, soft_targets, reduction="batchmean")
@@ -137,6 +150,15 @@ def distillation_loss(
         teacher_layers,
         student_output.frame_lengths,
     )
-    return (
-        supervised + logit_weight * temperature**2 * logit_term + hidden_state_weight * hidden_term
-    )
+    return {
+        "emotion": functional.cross_entropy(
+            student_output.emotion_logits, emotion_labels, weight=class_weights
+        ),
+        "soft_targets": logit_weight * temperature**2 * logit_term,
+        "hidden_states": hidden_state_weight * hidden_term,
+    }
+
+
+def distillation_loss(student_output: SpeechModelOutput, *args: Any, **kwargs: Any) -> torch.Tensor:
+    """Return the sum of the terms from `distillation_loss_terms`."""
+    return sum(distillation_loss_terms(student_output, *args, **kwargs).values())

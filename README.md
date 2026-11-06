@@ -52,3 +52,17 @@ python -m ruff format --check .
 ## Data
 
 The study uses IEMOCAP, RAVDESS, and Berlin Emo-DB. Datasets are not included in this repository; see [`data/README.md`](data/README.md).
+
+## Running the study
+
+```bash
+# Build the corpus manifest and audit transcript overlap
+python scripts/build_manifests.py --iemocap-root data/iemocap
+python scripts/audit_text_overlap.py --manifest data/manifests/iemocap.jsonl
+
+# Execute the planned training runs; completed runs are skipped after a restart
+python -m compact_ser.study_runner --manifest data/manifests/iemocap.jsonl \
+    --corpus-root data/iemocap --output-root outputs --scope core
+```
+
+Held-out test sessions are sealed: training code cannot read them, and only the transcript audit and final evaluation unseal them.

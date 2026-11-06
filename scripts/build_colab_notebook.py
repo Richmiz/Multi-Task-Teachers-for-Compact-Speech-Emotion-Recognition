@@ -116,7 +116,8 @@ with zipfile.ZipFile(io.BytesIO(bundle)) as archive:
 os.chdir(CODE_ROOT)
 os.environ["PYTHONPATH"] = str(CODE_ROOT / "src")
 os.environ["COMPACT_SER_BUNDLE_SHA256"] = BUNDLE_SHA256
-missing = [name for name in ("torch", "transformers") if importlib.util.find_spec(name) is None]
+packages = ("scipy", "soundfile", "torch", "transformers")
+missing = [name for name in packages if importlib.util.find_spec(name) is None]
 if missing:
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", *missing], check=True)
 

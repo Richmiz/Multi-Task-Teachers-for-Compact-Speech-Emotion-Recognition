@@ -58,6 +58,28 @@ class SessionFold:
 
 
 @dataclass(frozen=True)
+class TrainingSettings:
+    """Optimization settings shared by every training run."""
+
+    batch_size: int
+    learning_rate: float
+    teacher_updates: int
+    student_updates: int
+    validation_interval: int
+    gradient_log_interval: int
+    max_gradient_norm: float
+    calibration_batches: int
+
+
+@dataclass(frozen=True)
+class DistillationCandidate:
+    """Loss weights compared when tuning distillation."""
+
+    logit_weight: float
+    hidden_state_weight: float
+
+
+@dataclass(frozen=True)
 class StudyDesign:
     """Fixed study settings loaded from the configuration file."""
 
@@ -71,7 +93,9 @@ class StudyDesign:
     asr_update_shares: tuple[float, ...]
     primary_depth: int
     depths: tuple[int, ...]
-    distillation_candidates: int
+    training: TrainingSettings
+    distillation_temperature: float
+    distillation_candidates: tuple[DistillationCandidate, ...]
 
     @property
     def secondary_depths(self) -> tuple[int, ...]:
@@ -116,7 +140,8 @@ def load_study_design(path: Path = DEFAULT_SETTINGS_PATH) -> StudyDesign:
         The validated study settings.
 
     Raises:
-        ValueError: If the primary depth is not one of the student depths.
+        ValueError: If the primary depth is not a student depth, or teacher tuning does not
+            have the same number of candidates for every objective.
     """
     with path.open("rb") as stream:
         settings = tomllib.load(stream)
@@ -131,10 +156,22 @@ def load_study_design(path: Path = DEFAULT_SETTINGS_PATH) -> StudyDesign:
         asr_update_shares=tuple(settings["teacher_tuning"]["asr_update_shares"]),
         primary_depth=settings["student"]["primary_depth"],
         depths=tuple(settings["student"]["depths"]),
-        distillation_candidates=settings["student"]["distillation_candidates"],
+        training=TrainingSettings(**settings["training"]),
+        distillation_temperature=settings["distillation"]["temperature"],
+        distillation_candidates=tuple(
+            DistillationCandidate(**candidate)
+            for candidate in settings["distillation"]["candidates"]
+        ),
     )
     if design.primary_depth not in design.depths:
         raise ValueError(f"Primary depth {design.primary_depth} is not in {design.depths}.")
+    candidate_counts = {
+        len(design.tuning_seeds),
+        len(design.auxiliary_loss_scales),
+        len(design.asr_update_shares),
+    }
+    if len(candidate_counts) != 1:
+        raise ValueError("Teacher tuning needs the same number of candidates for every objective.")
     return design
 
 
@@ -211,7 +248,7 @@ def _distillation_tuning_runs(design: StudyDesign, objective: TeacherObjective) 
             seed=design.tuning_seeds[0],
         )
         for session in design.sessions
-        for candidate in range(design.distillation_candidates)
+        for candidate in range(len(design.distillation_candidates))
     ]
 
 

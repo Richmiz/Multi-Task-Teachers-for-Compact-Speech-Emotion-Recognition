@@ -22,4 +22,30 @@ asr_update_shares = [0.25, 0.5, 0.75]
 [student]
 primary_depth = 6
 depths = [6, 4]
-distillation_candidates = 3
+
+# Provisional values based on Gao et al. (Interspeech 2023): batch size 16, learning rate 1e-4, and
+# about 100 passes through three sessions. Confirm them before registration.
+[training]
+batch_size = 16
+learning_rate = 1e-4
+teacher_updates = 20000
+student_updates = 20000
+validation_interval = 1000
+gradient_log_interval = 500
+max_gradient_norm = 1.0
+calibration_batches = 8
+
+[distillation]
+temperature = 2.0
+
+[[distillation.candidates]]
+logit_weight = 1.0
+hidden_state_weight = 0.1
+
+[[distillation.candidates]]
+logit_weight = 1.0
+hidden_state_weight = 1.0
+
+[[distillation.candidates]]
+logit_weight = 0.5
+hidden_state_weight = 0.1
