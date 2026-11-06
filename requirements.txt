@@ -1,0 +1,7 @@
+# Exact versions used for local development and tests.
+--extra-index-url https://download.pytorch.org/whl/cpu
+numpy==2.5.4
+pytest==9.2.0
+ruff==0.17.4
+torch==2.15.0+cpu
+transformers==5.22.1

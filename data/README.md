@@ -1,0 +1,11 @@
+# Data
+
+Datasets are not stored in this repository, and each one remains under its original licence. Place local copies in this folder using the names below.
+
+| Dataset | Role | Folder | Access |
+| --- | --- | --- | --- |
+| IEMOCAP | Training, validation, and held-out testing | `data/iemocap/` | Request a licence from [USC SAIL](https://sail.usc.edu/iemocap/iemocap_release.htm) |
+| RAVDESS | External test | `data/ravdess/` | [Zenodo record 1188976](https://zenodo.org/records/1188976) |
+| Berlin Emo-DB | External test | `data/emodb/` | [TU Berlin](https://www.tu.berlin/kw/forschung/projekte/emotionale-sprechweise/) |
+
+IEMOCAP audio, labels, transcripts, and anything derived from them must not be committed or shared unless the licensor permits it. External test data must not be used for development, tuning, or debugging.

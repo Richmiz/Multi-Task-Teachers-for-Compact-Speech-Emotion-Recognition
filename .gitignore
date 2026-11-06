@@ -1,0 +1,30 @@
+# This repository uses an allowlist: everything is ignored unless listed below,
+# so a new local file cannot be published by accident.
+/*
+!/.editorconfig
+!/.gitattributes
+!/.gitignore
+!/CITATION.cff
+!/LICENSE
+!/README.md
+!/pyproject.toml
+!/requirements.txt
+!/configs/
+!/docs/
+!/scripts/
+!/src/
+!/tests/
+
+# Dataset instructions are published; the datasets are not.
+!/data/
+/data/*
+!/data/README.md
+
+# Generated files inside published folders
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

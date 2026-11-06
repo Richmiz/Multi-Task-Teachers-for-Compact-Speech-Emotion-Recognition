@@ -1,0 +1,25 @@
+# Fixed study settings. Record any change after registration as a dated protocol amendment.
+
+[checkpoint]
+name = "facebook/wav2vec2-base"
+revision = "0b5b8e868dd84f03fd87d01f9c4ff0f080fecfe8"
+
+[corpus]
+sessions = [1, 2, 3, 4, 5]
+emotions = ["angry", "happy", "sad", "neutral"]
+
+[seeds]
+confirmatory = [20270101, 20270102, 20270103]
+# Teachers without an auxiliary weight compare these seeds. Other runs use the first seed.
+tuning = [20270201, 20270202, 20270203]
+
+[teacher_tuning]
+# Each auxiliary loss is scaled to the initial emotion loss, then multiplied by these values.
+auxiliary_loss_scales = [0.01, 0.1, 1.0]
+# Share of updates given to speech recognition by the sequential teacher.
+asr_update_shares = [0.25, 0.5, 0.75]
+
+[student]
+primary_depth = 6
+depths = [6, 4]
+distillation_candidates = 3
