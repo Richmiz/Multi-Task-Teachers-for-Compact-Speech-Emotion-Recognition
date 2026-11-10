@@ -24,7 +24,8 @@ Each teacher produces emotion-only students with six or four Transformer layers.
 configs/          Fixed study settings
 data/             Dataset instructions (datasets are not distributed)
 docs/             Runtime documentation
-scripts/          Command-line tools, including the Colab notebook builder
+notebooks/        The notebook that runs jobs on Google Colab
+scripts/          Command-line tools for manifests and audits
 src/compact_ser/  The experiment package
 tests/            Unit tests
 ```

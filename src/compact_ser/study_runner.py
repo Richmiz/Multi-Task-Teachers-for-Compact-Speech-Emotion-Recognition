@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 import traceback
 from collections.abc import Callable, Sequence
@@ -29,6 +30,7 @@ from compact_ser.audio_data import (
     encode_utterances,
     iterate_batches,
 )
+from compact_ser.colab_jobs import CODE_COMMIT_VARIABLE
 from compact_ser.corpora import Partition, Utterance, read_manifest, select_partition
 from compact_ser.losses import distillation_loss_terms, multitask_loss_terms, transcript_loss
 from compact_ser.models import (
@@ -58,6 +60,7 @@ COMPLETION_MARKER = "STUDY RUNS COMPLETE"
 FAILURE_MARKER = "STUDY RUNS FAILED"
 RESULT_FILE_NAME = "result.json"
 MODEL_FILE_NAME = "model.pt"
+LEDGER_FILE_NAME = "run_ledger.jsonl"
 SOURCE_ENCODER_DEPTH = 12
 USES_TRANSCRIPTS = {
     TeacherObjective.SER_ASR_SID,
@@ -224,6 +227,7 @@ def _save_run(
         "best_update": outcome.best_update,
         "validation_history": outcome.validation_history,
         "wall_seconds": time.perf_counter() - started,
+        "code_commit": os.environ.get(CODE_COMMIT_VARIABLE),
         **details,
     }
     # The result is written last, so its presence shows that the model file is complete.
@@ -448,7 +452,7 @@ def execute_pending_runs(
     Returns:
         The number of runs executed.
     """
-    ledger = RunLedger(context.output_root / "run_ledger.jsonl")
+    ledger = RunLedger(context.output_root / LEDGER_FILE_NAME)
     pending = ledger.pending_runs(plan)
     if max_runs is not None:
         pending = pending[:max_runs]
@@ -475,14 +479,52 @@ def _small_encoder() -> Wav2Vec2Model:
         return Wav2Vec2Model(small_encoder_config())
 
 
-def main(arguments: Sequence[str] | None = None) -> None:
-    """Parse command-line arguments and execute pending runs."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--corpus-root", type=Path, required=True)
-    parser.add_argument("--output-root", type=Path, required=True)
-    parser.add_argument("--scope", choices=[scope.value for scope in PlanScope], default="core")
-    parser.add_argument("--max-runs", type=int)
+def build_context(
+    manifest: list[Utterance],
+    corpus_root: Path,
+    output_root: Path,
+    update_limit: int | None = None,
+    small_model: bool = False,
+) -> StudyContext:
+    """Create the study context from the study settings, using a GPU when one is available.
+
+    Args:
+        manifest: Utterances of the development corpus.
+        corpus_root: Folder that the manifest's audio paths are relative to.
+        output_root: Folder that receives run folders and the run ledger.
+        update_limit: If given, limit every run to this many updates. For checks only.
+        small_model: Use a small random model instead of the pinned checkpoint. For checks only.
+
+    Returns:
+        The study context.
+    """
+    design = load_study_design()
+    if update_limit is not None:
+        design = replace(
+            design,
+            training=replace(
+                design.training, teacher_updates=update_limit, student_updates=update_limit
+            ),
+        )
+    if small_model:
+        encoder_factory = _small_encoder
+    else:
+
+        def encoder_factory() -> Wav2Vec2Model:
+            return load_pretrained_encoder(design.checkpoint_name, design.checkpoint_revision)
+
+    return StudyContext(
+        design=design,
+        manifest=manifest,
+        corpus_root=corpus_root,
+        output_root=output_root,
+        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+        encoder_factory=encoder_factory,
+    )
+
+
+def add_check_options(parser: argparse.ArgumentParser) -> None:
+    """Add the options that shorten runs for checks."""
     parser.add_argument(
         "--update-limit",
         type=int,
@@ -493,34 +535,27 @@ def main(arguments: Sequence[str] | None = None) -> None:
         action="store_true",
         help="Use a small random model instead of downloading the checkpoint. For checks only.",
     )
+
+
+def main(arguments: Sequence[str] | None = None) -> None:
+    """Parse command-line arguments and execute pending runs."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--corpus-root", type=Path, required=True)
+    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--scope", choices=[scope.value for scope in PlanScope], default="core")
+    parser.add_argument("--max-runs", type=int)
+    add_check_options(parser)
     options = parser.parse_args(arguments)
 
-    design = load_study_design()
-    if options.update_limit is not None:
-        design = replace(
-            design,
-            training=replace(
-                design.training,
-                teacher_updates=options.update_limit,
-                student_updates=options.update_limit,
-            ),
-        )
-    if options.small_model:
-        encoder_factory = _small_encoder
-    else:
-
-        def encoder_factory() -> Wav2Vec2Model:
-            return load_pretrained_encoder(design.checkpoint_name, design.checkpoint_revision)
-
-    context = StudyContext(
-        design=design,
-        manifest=read_manifest(options.manifest),
-        corpus_root=options.corpus_root,
-        output_root=options.output_root,
-        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-        encoder_factory=encoder_factory,
+    context = build_context(
+        read_manifest(options.manifest),
+        options.corpus_root,
+        options.output_root,
+        options.update_limit,
+        options.small_model,
     )
-    plan = build_run_plan(design, PlanScope(options.scope))
+    plan = build_run_plan(context.design, PlanScope(options.scope))
     try:
         executed = execute_pending_runs(context, plan, options.max_runs)
     except Exception:

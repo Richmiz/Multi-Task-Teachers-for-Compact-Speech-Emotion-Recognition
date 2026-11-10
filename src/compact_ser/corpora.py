@@ -21,6 +21,8 @@ IEMOCAP_EMOTIONS = {
 RAVDESS_EMOTIONS = {"01": "neutral", "03": "happy", "04": "sad", "05": "angry"}
 RAVDESS_STATEMENTS = {"01": "Kids are talking by the door", "02": "Dogs are sitting by the door"}
 EMODB_EMOTIONS = {"W": "angry", "F": "happy", "T": "sad", "N": "neutral"}
+# Published four-class IEMOCAP counts: Gao et al., Interspeech 2023, section 3.1.
+IEMOCAP_FOUR_CLASS_COUNTS = {"happy": 1636, "sad": 1084, "angry": 1103, "neutral": 1708}
 
 _EVALUATION_LINE = re.compile(r"^\[[\d.]+ - [\d.]+\]\s+(?P<utterance>Ses\S+)\s+(?P<label>\w+)\s+\[")
 _TRANSCRIPT_LINE = re.compile(r"^(?P<utterance>Ses\S+)\s+\[[\d.\-]+\]:\s*(?P<text>.*)$")

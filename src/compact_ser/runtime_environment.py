@@ -14,7 +14,7 @@ from typing import Any
 import torch
 import transformers
 
-BUNDLE_CHECKSUM_VARIABLE = "COMPACT_SER_BUNDLE_SHA256"
+from compact_ser.colab_jobs import CODE_COMMIT_VARIABLE
 
 
 def describe_runtime() -> dict[str, Any]:
@@ -30,7 +30,7 @@ def describe_runtime() -> dict[str, Any]:
         "gpu_memory_gib": (
             torch.cuda.get_device_properties(0).total_memory / 2**30 if gpu_available else None
         ),
-        "code_bundle_sha256": os.environ.get(BUNDLE_CHECKSUM_VARIABLE),
+        "code_commit": os.environ.get(CODE_COMMIT_VARIABLE),
     }
 
 
