@@ -15,7 +15,7 @@ import os
 import time
 import traceback
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +61,7 @@ FAILURE_MARKER = "STUDY RUNS FAILED"
 RESULT_FILE_NAME = "result.json"
 MODEL_FILE_NAME = "model.pt"
 LEDGER_FILE_NAME = "run_ledger.jsonl"
+SETTINGS_FILE_NAME = "study_settings.json"
 SOURCE_ENCODER_DEPTH = 12
 USES_TRANSCRIPTS = {
     TeacherObjective.SER_ASR_SID,
@@ -286,21 +287,29 @@ def _train_teacher(context: StudyContext, run: RunSpec) -> dict[str, Any]:
         transcript_weight = speaker_weight = 0.0
     else:
         remaining_updates = settings.teacher_updates
-        transcript_weight = speaker_weight = 0.0
-        if uses_transcripts or uses_speakers:
-            calibration_stream = iterate_batches(
-                data.training, settings.batch_size, run.seed, context.device
-            )
-            calibration_batches = [
-                next(calibration_stream) for _ in range(settings.calibration_batches)
-            ]
-            scales = _calibrate_auxiliary_scales(model, calibration_batches, data.class_weights)
-            auxiliary_scale = design.auxiliary_loss_scales[candidate]
-            transcript_weight = auxiliary_scale * scales["transcript"]
-            speaker_weight = auxiliary_scale * scales["speaker"]
-            details["auxiliary_loss_scale"] = auxiliary_scale
-            details["transcript_weight"] = transcript_weight
-            details["speaker_weight"] = speaker_weight
+        # While the encoder is frozen, each head learns from its own loss alone, so any positive
+        # weight trains it. The weights are calibrated once the heads are trained.
+        transcript_weight = 1.0 if uses_transcripts else 0.0
+        speaker_weight = 1.0 if uses_speakers else 0.0
+
+    def calibrate_auxiliary_weights() -> None:
+        """Scale each auxiliary loss to the emotion loss of the trained heads, times λ."""
+        nonlocal transcript_weight, speaker_weight
+        stream = iterate_batches(data.training, settings.batch_size, run.seed, context.device)
+        calibration_batches = [next(stream) for _ in range(settings.calibration_batches)]
+        scales = _calibrate_auxiliary_scales(model, calibration_batches, data.class_weights)
+        auxiliary_scale = design.auxiliary_loss_scales[candidate]
+        transcript_weight = auxiliary_scale * scales["transcript"]
+        speaker_weight = auxiliary_scale * scales["speaker"]
+        details["auxiliary_loss_scale"] = auxiliary_scale
+        details["transcript_weight"] = transcript_weight
+        details["speaker_weight"] = speaker_weight
+        weights = f"transcript {transcript_weight:.4g}, speaker {speaker_weight:.4g}"
+        print(f"  calibrated weights: {weights}", flush=True)
+
+    is_joint = objective is not TeacherObjective.ASR_THEN_SER and (
+        uses_transcripts or uses_speakers
+    )
 
     def compute_loss(batch: SpeechBatch) -> tuple[dict[str, torch.Tensor], dict[str, float]]:
         output = model(batch.waveforms, batch.attention_mask)
@@ -321,7 +330,15 @@ def _train_teacher(context: StudyContext, run: RunSpec) -> dict[str, Any]:
             diagnostics["speaker_training_accuracy"] = float(accuracy)
         return terms, diagnostics
 
-    outcome = train_stage(model, compute_loss, batches, remaining_updates, settings, validate)
+    outcome = train_stage(
+        model,
+        compute_loss,
+        batches,
+        remaining_updates,
+        settings,
+        validate,
+        on_encoder_start=calibrate_auxiliary_weights if is_joint else None,
+    )
     details["gradient_history"] = outcome.gradient_history
     return _save_run(context, run, outcome, details, started)
 
@@ -439,6 +456,42 @@ def execute_run(context: StudyContext, run: RunSpec) -> dict[str, Any]:
     return _train_student(context, run)
 
 
+def check_study_settings(output_root: Path, design: StudyDesign) -> None:
+    """Record a study folder's settings, or confirm that they match the recorded ones.
+
+    Runs trained with different settings must not share a folder, because the ledger would treat
+    them as one study.
+
+    Args:
+        output_root: The study folder.
+        design: The settings of the runs about to be trained.
+
+    Raises:
+        ValueError: If the folder holds runs trained with other settings, or runs without a
+            settings record.
+    """
+    record = json.loads(json.dumps(asdict(design)))
+    path = output_root / SETTINGS_FILE_NAME
+    if path.exists():
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        changed = sorted(
+            name for name in record.keys() | saved.keys() if saved.get(name) != record.get(name)
+        )
+        if changed:
+            raise ValueError(
+                f"{output_root} holds runs trained with other settings ({', '.join(changed)}). "
+                "Move them to another folder before training with the current settings."
+            )
+        return
+    if (output_root / LEDGER_FILE_NAME).exists():
+        raise ValueError(
+            f"{output_root} holds runs without a record of their settings. Move them to another "
+            "folder before training."
+        )
+    output_root.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def execute_pending_runs(
     context: StudyContext, plan: Sequence[RunSpec], max_runs: int | None = None
 ) -> int:
@@ -452,6 +505,7 @@ def execute_pending_runs(
     Returns:
         The number of runs executed.
     """
+    check_study_settings(context.output_root, context.design)
     ledger = RunLedger(context.output_root / LEDGER_FILE_NAME)
     pending = ledger.pending_runs(plan)
     if max_runs is not None:
@@ -479,6 +533,22 @@ def _small_encoder() -> Wav2Vec2Model:
         return Wav2Vec2Model(small_encoder_config())
 
 
+def study_design(update_limit: int | None = None) -> StudyDesign:
+    """Load the study settings.
+
+    Args:
+        update_limit: If given, limit every run to this many updates. For checks only.
+
+    Returns:
+        The study settings.
+    """
+    design = load_study_design()
+    if update_limit is None:
+        return design
+    training = replace(design.training, teacher_updates=update_limit, student_updates=update_limit)
+    return replace(design, training=training)
+
+
 def build_context(
     manifest: list[Utterance],
     corpus_root: Path,
@@ -498,14 +568,7 @@ def build_context(
     Returns:
         The study context.
     """
-    design = load_study_design()
-    if update_limit is not None:
-        design = replace(
-            design,
-            training=replace(
-                design.training, teacher_updates=update_limit, student_updates=update_limit
-            ),
-        )
+    design = study_design(update_limit)
     if small_model:
         encoder_factory = _small_encoder
     else:

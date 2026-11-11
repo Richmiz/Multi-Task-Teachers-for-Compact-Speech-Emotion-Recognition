@@ -28,12 +28,14 @@ from compact_ser.corpora import read_iemocap
 from compact_ser.iemocap_archive import check_corpus, locate_study_store, restore_study_files
 from compact_ser.run_ledger import RunLedger
 from compact_ser.runtime_environment import save_runtime_record
-from compact_ser.study_design import PlanScope, RunSpec, build_run_plan, load_study_design
+from compact_ser.study_design import PlanScope, RunSpec, build_run_plan
 from compact_ser.study_runner import (
     LEDGER_FILE_NAME,
     add_check_options,
     build_context,
+    check_study_settings,
     execute_pending_runs,
+    study_design,
 )
 
 COMPLETION_MARKER = "TRAINING JOB COMPLETE"
@@ -153,12 +155,14 @@ def main(arguments: Sequence[str] | None = None) -> None:
     try:
         options.output_dir.mkdir(parents=True, exist_ok=True)
         print(f"Environment recorded in {save_runtime_record(options.output_dir)}.", flush=True)
+        design = study_design(options.update_limit)
+        check_study_settings(options.output_dir, design)
         store_dir = locate_study_store(options.store_dir, options.search_dir)
         corpus_dir = restore_study_files(store_dir, options.local_dir)
         print(f"Four-class utterances: {check_corpus(corpus_dir)['emotions']}", flush=True)
 
         context = build_context(
-            read_iemocap(corpus_dir, load_study_design().sessions),
+            read_iemocap(corpus_dir, design.sessions),
             corpus_dir,
             options.output_dir,
             options.update_limit,

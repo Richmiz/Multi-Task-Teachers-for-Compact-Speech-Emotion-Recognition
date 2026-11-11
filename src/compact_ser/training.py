@@ -130,6 +130,48 @@ def compute_gradient_shares(
     return {f"{name}_gradient_share": norm / max(total, 1e-12) for name, norm in norms.items()}
 
 
+def head_only_updates(updates: int, settings: TrainingSettings) -> int:
+    """Return how many of a stage's first updates train only the task heads."""
+    return round(settings.head_only_share * updates)
+
+
+def learning_rate_factor(update: int, updates: int, settings: TrainingSettings) -> float:
+    """Return the share of the peak learning rate used at an update.
+
+    The heads-only updates use the peak rate. Over the remaining updates the rate warms up
+    linearly, holds, and then decays linearly to zero, following wav2vec 2.0's schedule.
+
+    Args:
+        update: The update, counted from 1.
+        updates: Number of updates in the stage.
+        settings: Optimization settings.
+
+    Returns:
+        A factor between 0 and 1.
+    """
+    heads_only = head_only_updates(updates, settings)
+    if update <= heads_only:
+        return 1.0
+    position = update - heads_only
+    span = updates - heads_only
+    warmup = settings.warmup_share * span
+    hold = settings.hold_share * span
+    if position <= warmup:
+        return position / warmup
+    if position <= warmup + hold:
+        return 1.0
+    return max(0.0, (span - position) / (span - warmup - hold))
+
+
+def _report_validation(update: int, updates: int, metrics: dict[str, float], heads_only: bool):
+    line = f"  update {update}/{updates}: validation UAR {metrics['uar']:.3f}"
+    if "word_error_rate" in metrics:
+        line += f", WER {metrics['word_error_rate']:.3f}"
+    if heads_only:
+        line += " (heads only)"
+    print(line, flush=True)
+
+
 def train_stage(
     model: SpeechEmotionModel,
     compute_loss: LossFunction,
@@ -137,8 +179,13 @@ def train_stage(
     updates: int,
     settings: TrainingSettings,
     validate: Validator | None = None,
+    on_encoder_start: Callable[[], None] | None = None,
 ) -> TrainingOutcome:
     """Run a fixed number of updates, keeping the weights with the best validation UAR.
+
+    The first updates train only the task heads, with the encoder frozen, so that the heads'
+    random initial gradients do not disturb the pretrained encoder. The encoder then trains with a
+    learning rate that warms up, holds, and decays.
 
     Args:
         model: The model to train.
@@ -147,35 +194,59 @@ def train_stage(
         updates: Number of optimizer updates.
         settings: Optimization settings.
         validate: Returns validation metrics, including `uar`. If omitted, no weights are kept.
+        on_encoder_start: Called once, just before the encoder starts training, for example to
+            set loss weights from the trained heads.
 
     Returns:
         The best weights and training records.
     """
     parameters = [parameter for parameter in model.parameters() if parameter.requires_grad]
+    encoder_parameters = [
+        parameter for parameter in model.encoder.parameters() if parameter.requires_grad
+    ]
     encoder_layers = [
         parameter for parameter in model.encoder.encoder.parameters() if parameter.requires_grad
     ]
+    heads_only = head_only_updates(updates, settings)
     optimizer = torch.optim.AdamW(parameters, lr=settings.learning_rate)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lambda step: learning_rate_factor(step + 1, updates, settings)
+    )
     outcome = TrainingOutcome()
     model.train()
+    for parameter in encoder_parameters:
+        parameter.requires_grad_(heads_only == 0)
     for update in range(1, updates + 1):
+        if update == heads_only + 1:
+            for parameter in encoder_parameters:
+                parameter.requires_grad_(True)
+            if on_encoder_start is not None:
+                on_encoder_start()
+            if heads_only:
+                print(f"  update {update}/{updates}: encoder training starts.", flush=True)
+        encoder_trains = update > heads_only
         optimizer.zero_grad(set_to_none=True)
         terms, diagnostics = compute_loss(next(batches))
-        if update == 1 or update % settings.gradient_log_interval == 0:
+        is_log_update = update == heads_only + 1 or update % settings.gradient_log_interval == 0
+        if encoder_trains and is_log_update:
             shares = compute_gradient_shares(terms, encoder_layers)
             outcome.gradient_history.append({"update": update, **shares, **diagnostics})
         sum(terms.values()).backward()
         torch.nn.utils.clip_grad_norm_(parameters, settings.max_gradient_norm)
         optimizer.step()
+        scheduler.step()
 
         is_validation_update = update % settings.validation_interval == 0 or update == updates
         if validate is not None and is_validation_update:
             metrics = validate(model)
             outcome.validation_history.append({"update": update, **metrics})
+            _report_validation(update, updates, metrics, not encoder_trains)
             if outcome.best_state is None or metrics["uar"] > outcome.best_metrics["uar"]:
                 outcome.best_state = {
                     name: value.detach().cpu().clone() for name, value in model.state_dict().items()
                 }
                 outcome.best_update = update
                 outcome.best_metrics = metrics
+    for parameter in encoder_parameters:
+        parameter.requires_grad_(True)
     return outcome

@@ -38,6 +38,7 @@ def design():
         validation_interval=1,
         gradient_log_interval=1,
         calibration_batches=1,
+        head_only_share=0.25,
     )
     return replace(base, confirmatory_seeds=base.confirmatory_seeds[:1], training=training)
 

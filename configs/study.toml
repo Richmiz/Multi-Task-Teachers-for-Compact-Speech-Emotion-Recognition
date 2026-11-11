@@ -14,7 +14,8 @@ confirmatory = [20270101, 20270102, 20270103]
 tuning = [20270201, 20270202, 20270203]
 
 [teacher_tuning]
-# Each auxiliary loss is scaled to the initial emotion loss, then multiplied by these values.
+# Each auxiliary loss is scaled to the emotion loss measured when the encoder starts training, after
+# the heads-only phase, then multiplied by these values.
 auxiliary_loss_scales = [0.01, 0.1, 1.0]
 # Share of updates given to speech recognition by the sequential teacher.
 asr_update_shares = [0.25, 0.5, 0.75]
@@ -23,8 +24,9 @@ asr_update_shares = [0.25, 0.5, 0.75]
 primary_depth = 6
 depths = [6, 4]
 
-# Provisional values based on Gao et al. (Interspeech 2023): batch size 16, learning rate 1e-4, and
-# about 100 passes through three sessions. Confirm them before registration.
+# Provisional values based on Gao et al. (Interspeech 2023): batch size 16, learning rate 1e-4
+# (reported as "10e-5"), and about 100 passes through three sessions. Confirm them before
+# registration.
 [training]
 batch_size = 16
 learning_rate = 1e-4
@@ -34,6 +36,13 @@ validation_interval = 1000
 gradient_log_interval = 500
 max_gradient_norm = 1.0
 calibration_batches = 8
+# Fine-tuning schedule adapted from wav2vec 2.0 (Baevski et al., NeurIPS 2020, Section 4.3). In each
+# training stage, only the task heads train for the first share of updates. The encoder then
+# trains with a learning rate that warms up, holds, and decays linearly, in these shares of the
+# remaining updates. A constant rate without these phases collapsed two of three pilot teachers.
+head_only_share = 0.1
+warmup_share = 0.1
+hold_share = 0.4
 
 [distillation]
 temperature = 2.0

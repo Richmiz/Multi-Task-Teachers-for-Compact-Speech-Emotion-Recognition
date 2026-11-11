@@ -41,6 +41,10 @@ Colab runs only code that has been pushed, so every result on Drive can be trace
 
 The run ledger in `study/` records each run's progress, so the next session continues with the next pending run. A run interrupted by a lost runtime starts again from the beginning. A lock file stops two runtimes from training the same study at once; a lock that has not been refreshed for 10 minutes is taken over.
 
+`study/study_settings.json` records the training settings of the runs in the folder. If the settings in `configs/study.toml` change, the job stops before training, so that runs trained with different settings are never mixed. Rename the old folder on Drive, for example to `pilot-1`, and the next run starts a new `study/` folder.
+
+The log shows validation UAR, and word error rate for teachers that learn transcription, at every validation pass, so a run that is not learning can be stopped early.
+
 ## Data on Google Drive
 
 IEMOCAP is downloaded with a temporary credential, so it cannot be downloaded again in each session as public datasets can. The `iemocap-store` job therefore saves one verified copy:

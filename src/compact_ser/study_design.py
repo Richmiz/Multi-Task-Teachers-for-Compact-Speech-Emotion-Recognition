@@ -69,6 +69,9 @@ class TrainingSettings:
     gradient_log_interval: int
     max_gradient_norm: float
     calibration_batches: int
+    head_only_share: float
+    warmup_share: float
+    hold_share: float
 
 
 @dataclass(frozen=True)
