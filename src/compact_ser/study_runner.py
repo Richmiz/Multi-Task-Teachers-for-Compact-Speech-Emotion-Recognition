@@ -319,7 +319,8 @@ def _train_teacher(context: StudyContext, run: RunSpec) -> dict[str, Any]:
     def calibrate_auxiliary_weights() -> None:
         """Scale each auxiliary loss to the emotion loss of the trained heads, times λ."""
         nonlocal transcript_weight, speaker_weight
-        stream = _training_batches(context, data, run)
+        # Random batches, not length-grouped ones, so the losses represent the training data.
+        stream = iterate_batches(data.training, settings.batch_size, run.seed, context.device)
         calibration_batches = [next(stream) for _ in range(settings.calibration_batches)]
         with precision_context(context.device, settings.mixed_precision):
             scales = _calibrate_auxiliary_scales(model, calibration_batches, data.class_weights)

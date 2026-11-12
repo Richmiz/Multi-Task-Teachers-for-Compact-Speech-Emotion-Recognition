@@ -35,7 +35,8 @@ student_updates = 20000
 validation_interval = 2000
 gradient_log_interval = 500
 max_gradient_norm = 1.0
-calibration_batches = 8
+# Random batches used to calibrate auxiliary loss weights (512 utterances).
+calibration_batches = 32
 # Fine-tuning schedule adapted from wav2vec 2.0 (Baevski et al., NeurIPS 2020, Section 4.3). In each
 # training stage, only the task heads train for the first share of updates. The encoder then
 # trains with a learning rate that warms up, holds, and decays linearly, in these shares of the
