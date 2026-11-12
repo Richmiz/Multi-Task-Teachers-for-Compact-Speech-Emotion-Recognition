@@ -35,7 +35,7 @@ Colab runs only code that has been pushed, so every result on Drive can be trace
 
 | Option | Effect |
 | --- | --- |
-| `--scope core` or `--scope full` | Plan to follow; `core` is the primary comparison |
+| `--scope pilot`, `core`, or `full` | Plan to follow: `pilot` is the validation pilot (teacher tuning and pilot students), `core` adds the primary comparison, and `full` adds every other run |
 | `--max-runs N` | Execute at most `N` runs in this session |
 | `--runs RUN_ID ...` | Execute only the named planned runs, in plan order |
 

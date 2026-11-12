@@ -67,6 +67,15 @@ def test_core_plan_is_the_start_of_the_full_plan(design):
     assert full[: len(core)] == core
 
 
+def test_pilot_plan_is_the_validation_pilot_at_the_start_of_the_core_plan(design):
+    pilot = build_run_plan(design, PlanScope.PILOT)
+    assert Counter(run.kind for run in pilot) == {
+        RunKind.TEACHER_TUNING: 30,
+        RunKind.PILOT_STUDENT: 10,
+    }
+    assert build_run_plan(design, PlanScope.CORE)[: len(pilot)] == pilot
+
+
 def test_run_identifiers_are_unique_and_safe_as_folder_names(design):
     identifiers = [run.run_id for run in build_run_plan(design)]
     assert len(identifiers) == len(set(identifiers))

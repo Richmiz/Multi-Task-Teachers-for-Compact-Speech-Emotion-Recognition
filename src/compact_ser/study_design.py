@@ -33,8 +33,13 @@ class RunKind(StrEnum):
 
 
 class PlanScope(StrEnum):
-    """Parts of the study that a run plan can cover."""
+    """Parts of the study that a run plan can cover.
 
+    `PILOT` is the validation pilot: teacher tuning and pilot students for the core objectives.
+    `CORE` adds the runs of the primary comparison, and `FULL` adds every other run.
+    """
+
+    PILOT = "pilot"
     CORE = "core"
     FULL = "full"
 
@@ -291,6 +296,8 @@ def build_run_plan(design: StudyDesign, scope: PlanScope = PlanScope.FULL) -> tu
         plan += _teacher_tuning_runs(design, objective)
     for objective in core_objectives:
         plan += _pilot_student_runs(design, objective)
+    if scope is PlanScope.PILOT:
+        return tuple(plan)
     for objective in core_objectives:
         plan += _teacher_runs(design, objective)
     for objective in core_objectives:
