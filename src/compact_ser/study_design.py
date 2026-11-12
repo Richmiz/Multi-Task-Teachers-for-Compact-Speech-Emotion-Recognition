@@ -77,6 +77,8 @@ class TrainingSettings:
     head_only_share: float
     warmup_share: float
     hold_share: float
+    mixed_precision: bool
+    group_batches_by_length: bool
 
 
 @dataclass(frozen=True)

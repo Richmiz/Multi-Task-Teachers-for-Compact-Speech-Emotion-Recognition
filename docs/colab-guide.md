@@ -17,7 +17,7 @@ Colab runs only code that has been pushed, so every result on Drive can be trace
 ## Steps in VS Code
 
 1. Commit and push the code to run.
-2. Open the notebook, then choose **Select Kernel → Colab → New Colab Server**. Select a GPU, or a CPU runtime for the IEMOCAP jobs.
+2. Open the notebook, then choose **Select Kernel → Colab → New Colab Server**. Select an **L4** GPU for training, or a CPU runtime for the IEMOCAP jobs. The L4's 24 GB is enough with mixed precision and length-grouped batches, and in March 2026 it cost 1.71 compute units per hour, against 8.71 for the G4 ([McCormick, 2026](https://mccormickml.com/2024/04/23/colab-gpus-features-and-pricing/)). Each training result records its peak GPU memory and time spent validating.
 3. Set `JOB`, `JOB_OPTIONS`, and `CODE_REF` in the first cell, then choose **Run All**. If Google Drive is not mounted, run **Colab: Mount Google Drive to Server...** from the Command Palette, then choose **Run All** again.
 4. Leave the notebook running. If a job fails, the notebook does not shut the runtime down, so disconnect it yourself.
 5. Clear the notebook's outputs before committing any change to it.

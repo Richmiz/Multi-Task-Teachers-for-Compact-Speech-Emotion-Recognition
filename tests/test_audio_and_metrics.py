@@ -82,6 +82,23 @@ def test_batch_order_depends_only_on_the_seed_and_covers_each_item_once_per_pass
     assert sorted(sum(labels, [])) == list(range(6))
 
 
+def test_length_grouped_batches_cover_the_data_and_start_with_the_longest():
+    rng = np.random.default_rng(0)
+    lengths = rng.integers(1_000, 50_000, size=230)
+    items = [
+        EncodedUtterance(np.zeros(length, dtype=np.float32), 0, 0, (), "") for length in lengths
+    ]
+    batch_size = 4
+    stream = iterate_batches(items, batch_size, seed=3, device=CPU, group_by_length=True)
+    first_pass = [next(stream) for _ in range(len(items) // batch_size)]
+    assert first_pass[0].waveforms.shape[1] == lengths.max()
+    padded = sum(batch.waveforms.numel() for batch in first_pass)
+    used = sum(int(batch.attention_mask.sum()) for batch in first_pass)
+    assert used / padded > 0.95
+    repeat = iterate_batches(items, batch_size, seed=3, device=CPU, group_by_length=True)
+    assert all(torch.equal(next(repeat).waveforms, batch.waveforms) for batch in first_pass[:5])
+
+
 def test_class_weights_favor_rare_classes():
     items = [make_item(1, emotion=0)] * 3 + [make_item(1, emotion=1)]
     weights = compute_class_weights(items, 2)

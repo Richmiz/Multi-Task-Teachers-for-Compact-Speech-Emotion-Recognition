@@ -32,7 +32,7 @@ batch_size = 16
 learning_rate = 1e-4
 teacher_updates = 20000
 student_updates = 20000
-validation_interval = 1000
+validation_interval = 2000
 gradient_log_interval = 500
 max_gradient_norm = 1.0
 calibration_batches = 8
@@ -43,6 +43,10 @@ calibration_batches = 8
 head_only_share = 0.1
 warmup_share = 0.1
 hold_share = 0.4
+# Efficiency settings that keep the method unchanged: bfloat16 mixed precision on a GPU, and
+# batches of utterances with similar lengths, which reduces padding.
+mixed_precision = true
+group_batches_by_length = true
 
 [distillation]
 temperature = 2.0

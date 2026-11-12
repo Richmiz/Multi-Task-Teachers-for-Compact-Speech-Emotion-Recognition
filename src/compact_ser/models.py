@@ -145,7 +145,9 @@ def load_pretrained_encoder(name: str, revision: str) -> Wav2Vec2Model:
     Returns:
         The pretrained encoder.
     """
-    return Wav2Vec2Model.from_pretrained(name, revision=revision)
+    # Scaled dot-product attention does not store attention matrices, which saves memory on long
+    # utterances.
+    return Wav2Vec2Model.from_pretrained(name, revision=revision, attn_implementation="sdpa")
 
 
 def build_student(

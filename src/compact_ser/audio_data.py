@@ -17,6 +17,8 @@ from compact_ser.text_processing import TranscriptTokenizer, normalize_transcrip
 
 SAMPLE_RATE = 16_000
 UNKNOWN_SPEAKER = -1
+# Batches per length-sorted group, as in the Hugging Face length-grouped sampler.
+LENGTH_GROUP_BATCHES = 50
 
 
 @dataclass(frozen=True)
@@ -144,31 +146,60 @@ def collate_batch(items: Sequence[EncodedUtterance], device: torch.device) -> Sp
     )
 
 
+def _length_grouped_batches(
+    lengths: Sequence[int], order: list[int], size: int, generator: torch.Generator
+) -> list[list[int]]:
+    """Group a shuffled order into batches of similar length, in random batch order."""
+    group_size = size * LENGTH_GROUP_BATCHES
+    batches = []
+    for start in range(0, len(order), group_size):
+        group = sorted(order[start : start + group_size], key=lengths.__getitem__, reverse=True)
+        batches += [group[i : i + size] for i in range(0, len(group) - size + 1, size)]
+    permutation = torch.randperm(len(batches), generator=generator).tolist()
+    return [batches[index] for index in permutation]
+
+
 def iterate_batches(
     items: Sequence[EncodedUtterance],
     batch_size: int,
     seed: int,
     device: torch.device,
+    group_by_length: bool = False,
 ) -> Iterator[SpeechBatch]:
     """Yield shuffled batches indefinitely, reshuffling after each pass through the data.
 
     Incomplete final batches are dropped, so every update uses the same number of utterances.
+    Grouping by length reduces padding: the shuffled order is cut into groups of
+    `LENGTH_GROUP_BATCHES` batches, each group is sorted by length and split into batches, and the
+    batches are shuffled. The batch holding the longest utterance comes first, so a batch that does
+    not fit in memory fails at once.
 
     Args:
         items: Utterances to sample.
         batch_size: Number of utterances in a batch.
         seed: Seed for the shuffling order.
         device: Device that receives the tensors.
+        group_by_length: Whether to put utterances of similar length in the same batch.
 
     Yields:
         One batch for each update.
     """
     generator = torch.Generator().manual_seed(seed)
     size = min(batch_size, len(items))
+    lengths = [item.waveform.size for item in items]
+    first_pass = True
     while True:
         order = torch.randperm(len(items), generator=generator).tolist()
-        for start in range(0, len(order) - size + 1, size):
-            yield collate_batch([items[index] for index in order[start : start + size]], device)
+        if group_by_length:
+            batches = _length_grouped_batches(lengths, order, size, generator)
+            if first_pass:
+                longest = max(range(len(batches)), key=lambda i: lengths[batches[i][0]])
+                batches.insert(0, batches.pop(longest))
+        else:
+            batches = [order[i : i + size] for i in range(0, len(order) - size + 1, size)]
+        first_pass = False
+        for batch in batches:
+            yield collate_batch([items[index] for index in batch], device)
 
 
 def compute_class_weights(items: Sequence[EncodedUtterance], num_classes: int) -> torch.Tensor:

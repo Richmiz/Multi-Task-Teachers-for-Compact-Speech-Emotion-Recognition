@@ -14,7 +14,7 @@ import json
 import os
 import time
 import traceback
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -54,7 +54,13 @@ from compact_ser.study_design import (
     session_folds,
 )
 from compact_ser.text_processing import TranscriptTokenizer
-from compact_ser.training import TrainingOutcome, evaluate_model, seed_everything, train_stage
+from compact_ser.training import (
+    TrainingOutcome,
+    evaluate_model,
+    precision_context,
+    seed_everything,
+    train_stage,
+)
 
 COMPLETION_MARKER = "STUDY RUNS COMPLETE"
 FAILURE_MARKER = "STUDY RUNS FAILED"
@@ -145,6 +151,17 @@ def _fold_for_session(design: StudyDesign, test_session: int) -> SessionFold:
     )
 
 
+def _training_batches(context: StudyContext, data: FoldData, run: RunSpec) -> Iterator[SpeechBatch]:
+    settings = context.design.training
+    return iterate_batches(
+        data.training,
+        settings.batch_size,
+        run.seed,
+        context.device,
+        group_by_length=settings.group_batches_by_length,
+    )
+
+
 def _load_result(context: StudyContext, run_id: str) -> dict[str, Any]:
     path = context.run_folder(run_id) / RESULT_FILE_NAME
     if not path.exists():
@@ -228,6 +245,8 @@ def _save_run(
         "best_update": outcome.best_update,
         "validation_history": outcome.validation_history,
         "wall_seconds": time.perf_counter() - started,
+        "validation_seconds": outcome.validation_seconds,
+        "peak_gpu_memory_gib": outcome.peak_gpu_memory_gib,
         "code_commit": os.environ.get(CODE_COMMIT_VARIABLE),
         **details,
     }
@@ -262,10 +281,15 @@ def _train_teacher(context: StudyContext, run: RunSpec) -> dict[str, Any]:
     def validate(current_model: SpeechEmotionModel) -> dict[str, float]:
         tokenizer = data.tokenizer if uses_transcripts else None
         return evaluate_model(
-            current_model, data.validation, context.num_emotions, context.device, tokenizer
+            current_model,
+            data.validation,
+            context.num_emotions,
+            context.device,
+            tokenizer,
+            mixed_precision=settings.mixed_precision,
         )["metrics"]
 
-    batches = iterate_batches(data.training, settings.batch_size, run.seed, context.device)
+    batches = _training_batches(context, data, run)
     details: dict[str, Any] = {
         "architecture": {"vocabulary_size": vocabulary_size, "num_speakers": num_speakers},
         "candidate": candidate,
@@ -295,9 +319,10 @@ def _train_teacher(context: StudyContext, run: RunSpec) -> dict[str, Any]:
     def calibrate_auxiliary_weights() -> None:
         """Scale each auxiliary loss to the emotion loss of the trained heads, times λ."""
         nonlocal transcript_weight, speaker_weight
-        stream = iterate_batches(data.training, settings.batch_size, run.seed, context.device)
+        stream = _training_batches(context, data, run)
         calibration_batches = [next(stream) for _ in range(settings.calibration_batches)]
-        scales = _calibrate_auxiliary_scales(model, calibration_batches, data.class_weights)
+        with precision_context(context.device, settings.mixed_precision):
+            scales = _calibrate_auxiliary_scales(model, calibration_batches, data.class_weights)
         auxiliary_scale = design.auxiliary_loss_scales[candidate]
         transcript_weight = auxiliary_scale * scales["transcript"]
         speaker_weight = auxiliary_scale * scales["speaker"]
@@ -423,11 +448,15 @@ def _train_student(context: StudyContext, run: RunSpec) -> dict[str, Any]:
         return terms, {}
 
     def validate(current_model: SpeechEmotionModel) -> dict[str, float]:
-        return evaluate_model(current_model, data.validation, context.num_emotions, context.device)[
-            "metrics"
-        ]
+        return evaluate_model(
+            current_model,
+            data.validation,
+            context.num_emotions,
+            context.device,
+            mixed_precision=settings.mixed_precision,
+        )["metrics"]
 
-    batches = iterate_batches(data.training, settings.batch_size, run.seed, context.device)
+    batches = _training_batches(context, data, run)
     outcome = train_stage(
         student, compute_loss, batches, settings.student_updates, settings, validate
     )
@@ -518,10 +547,12 @@ def execute_pending_runs(
             ledger.record(run.run_id, RunStatus.FAILED, error=repr(error))
             raise
         ledger.record(run.run_id, RunStatus.COMPLETED, wall_seconds=result["wall_seconds"])
+        memory = result["peak_gpu_memory_gib"]
         print(
             f"Run {position}/{len(pending)} {run.run_id}: "
             f"validation UAR {result['validation_metrics']['uar']:.4f}, "
-            f"{result['wall_seconds']:.0f} s",
+            f"{result['wall_seconds']:.0f} s ({result['validation_seconds']:.0f} s validating)"
+            + (f", peak GPU memory {memory:.1f} GiB" if memory is not None else ""),
             flush=True,
         )
     return len(pending)
