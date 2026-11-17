@@ -1,8 +1,10 @@
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import torch
 
 from compact_ser import colab_jobs, iemocap_archive, runtime_check, training_job
 from compact_ser.colab_jobs import (
@@ -117,3 +119,33 @@ def test_runner_notebook_defaults_to_a_known_job(notebook):
     if namespace["JOB"] == "training" and "--runs" in options:
         run_ids = options[options.index("--runs") + 1 :]
         training_job.select_runs(build_run_plan(load_study_design()), run_ids)
+
+
+def test_fresh_study_uses_one_project_subfolder_for_logs_and_results(
+    notebook, tmp_path, monkeypatch
+):
+    parameters: dict[str, object] = {}
+    exec("".join(code_cells(notebook)[0]["source"]), parameters)
+    project = tmp_path / parameters["DRIVE_FOLDER"]
+    monkeypatch.setattr(colab_jobs, "mount_drive", lambda name: tmp_path / name)
+    monkeypatch.setattr(colab_jobs, "install_missing_packages", lambda: None)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(
+        torch.cuda, "get_device_properties", lambda _: SimpleNamespace(total_memory=1, name="L4")
+    )
+
+    session = colab_jobs.prepare_session(
+        parameters["JOB"],
+        parameters["DRIVE_FOLDER"],
+        REPOSITORY_ROOT,
+        "abc123",
+        job_folder=parameters["TRAINING_FOLDER"],
+    )
+    command = job_command(session, parameters["JOB_OPTIONS"])
+    output = Path(command[command.index("--output-dir") + 1])
+    assert output.parent == project
+    assert output.name not in {"study", "main_study"}
+    assert output.is_dir()
+    assert session.log_path.parent == output
+    assert Path(command[command.index("--store-dir") + 1]) == project / "datasets" / "iemocap"
+    assert "--adopt-from" not in command

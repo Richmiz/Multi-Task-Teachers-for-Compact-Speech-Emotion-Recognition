@@ -20,7 +20,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -197,7 +197,14 @@ def install_missing_packages(packages: Sequence[str] = REQUIRED_PACKAGES) -> Non
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", *missing], check=True)
 
 
-def prepare_session(job_name: str, drive_folder: str, code_root: Path, commit: str) -> ColabSession:
+def prepare_session(
+    job_name: str,
+    drive_folder: str,
+    code_root: Path,
+    commit: str,
+    *,
+    job_folder: str | None = None,
+) -> ColabSession:
     """Mount Drive, check the runtime, and prepare a job.
 
     Args:
@@ -205,14 +212,20 @@ def prepare_session(job_name: str, drive_folder: str, code_root: Path, commit: s
         drive_folder: The project's folder, relative to My Drive.
         code_root: The repository checkout that the job runs from.
         commit: The commit of that checkout.
+        job_folder: Optional name of a results subfolder directly under the project folder.
 
     Returns:
         The prepared session.
 
     Raises:
         RuntimeError: If the job needs a GPU and the runtime has none.
+        ValueError: If job_folder is not a single folder name.
     """
     job = find_job(job_name)
+    if job_folder is not None:
+        if job_folder in {"", ".", ".."} or any(char in job_folder for char in "/\\:"):
+            raise ValueError("job_folder must be one folder name under the project folder.")
+        job = replace(job, folder=job_folder)
     output_root = mount_drive(drive_folder)
     install_missing_packages()
     if job.requires_gpu:

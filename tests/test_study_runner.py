@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 import torch
 
+from compact_ser import study_runner
 from compact_ser.corpora import read_iemocap, write_manifest
 from compact_ser.run_ledger import RunLedger, RunStatus
 from compact_ser.study_design import (
@@ -208,6 +209,33 @@ def test_student_keeps_only_the_emotion_head(completed_study):
     assert not any(name.startswith(("transcript_head", "speaker_head")) for name in state)
     layers = {name.split(".")[3] for name in state if name.startswith("encoder.encoder.layers.")}
     assert len(layers) == run.depth
+
+
+def test_paired_students_start_with_identical_emotion_heads(
+    design, manifest, sealed_corpus, tmp_path, monkeypatch
+):
+    context = make_context(design, manifest, sealed_corpus, tmp_path)
+    plan = [
+        run
+        for run in build_run_plan(design, PlanScope.CORE)
+        if run.test_session == TEST_SESSION
+        and run.kind in (RunKind.TEACHER, RunKind.DISTILLED_STUDENT)
+    ]
+    initial_heads = []
+    real_build_student = study_runner.build_student
+
+    def capture_student_head(*args, **kwargs):
+        model = real_build_student(*args, **kwargs)
+        initial_heads.append(
+            (model.emotion_head.weight.detach().clone(), model.emotion_head.bias.detach().clone())
+        )
+        return model
+
+    monkeypatch.setattr(study_runner, "build_student", capture_student_head)
+    assert execute_pending_runs(context, plan) == 4
+    first, second = initial_heads
+    torch.testing.assert_close(first[0], second[0], rtol=0, atol=0)
+    torch.testing.assert_close(first[1], second[1], rtol=0, atol=0)
 
 
 def test_frontend_stays_frozen_in_trained_students(completed_study, design):

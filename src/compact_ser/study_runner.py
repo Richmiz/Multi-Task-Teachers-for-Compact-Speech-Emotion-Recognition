@@ -381,6 +381,8 @@ def _train_student(context: StudyContext, run: RunSpec) -> dict[str, Any]:
     seed_everything(run.seed)
     teacher = _load_teacher(context, teacher_id) if teacher_id else None
     source_encoder = teacher.encoder if teacher else context.encoder_factory()
+    # Loading a teacher with auxiliary heads consumes extra random draws.
+    seed_everything(run.seed)
     student = build_student(source_encoder, run.depth, context.num_emotions)
     student.encoder.freeze_feature_encoder()
     student.to(context.device)

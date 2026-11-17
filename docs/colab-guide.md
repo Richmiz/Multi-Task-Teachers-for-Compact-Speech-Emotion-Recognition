@@ -18,7 +18,7 @@ Colab runs only code that has been pushed, so every result on Drive can be trace
 
 1. Commit and push the code to run.
 2. Open the notebook, then choose **Select Kernel → Colab → New Colab Server**. Select an **L4** GPU for training, or a CPU runtime for the IEMOCAP jobs. The L4's 24 GB is enough with mixed precision and length-grouped batches, and in March 2026 it cost 1.71 compute units per hour, against 8.71 for the G4 ([McCormick, 2026](https://mccormickml.com/2024/04/23/colab-gpus-features-and-pricing/)). Each training result records its peak GPU memory and time spent validating.
-3. Set `JOB`, `JOB_OPTIONS`, and `CODE_REF` in the first cell, then choose **Run All**. If Google Drive is not mounted, run **Colab: Mount Google Drive to Server...** from the Command Palette, then choose **Run All** again.
+3. Review `JOB`, `JOB_OPTIONS`, and `CODE_REF` in the first cell, then choose **Run All**. If Google Drive is not mounted, run **Colab: Mount Google Drive to Server...** from the Command Palette, then choose **Run All** again.
 4. Leave the notebook running. If a job fails, the notebook does not shut the runtime down, so disconnect it yourself.
 5. Clear the notebook's outputs before committing any change to it.
 
@@ -29,7 +29,7 @@ Colab runs only code that has been pushed, so every result on Drive can be trace
 | `runtime-check` | Records the environment, loads the pinned checkpoint, and measures training updates on synthetic audio | GPU | `runtime_check/` |
 | `iemocap-store` | Downloads the licensed IEMOCAP archive once, keeps only the files the study uses, checks them, and saves the verified copy to Drive | CPU | `datasets/iemocap/`, `iemocap_store/` |
 | `iemocap-check` | Copies the stored copy from Drive to the runtime, verifies it, and checks the four-class counts | CPU | `iemocap_check/` |
-| `training` | Restores IEMOCAP the same way, then executes the next pending planned runs | GPU | `main_study/` |
+| `training` | Restores IEMOCAP the same way, then executes the next pending planned runs | GPU | `core_study_2026-11-17/` as set by `TRAINING_FOLDER` |
 
 `training` takes these options:
 
@@ -42,9 +42,11 @@ Colab runs only code that has been pushed, so every result on Drive can be trace
 
 Options may use `{output_root}` for the project's Drive folder, for example `--adopt-from {output_root}/study`. Each adopted run keeps its model and result, and its result and ledger entry record where it came from. Adoption refuses a folder in which a runtime is still training, or whose teachers were trained with other settings.
 
-The run ledger in `main_study/` records each run's progress, so the next session continues with the next pending run. A run interrupted by a lost runtime starts again from the beginning. A lock file stops two runtimes from training the same study at once; a lock that has not been refreshed for 10 minutes is taken over. A runtime started from VS Code stops when the computer sleeps, so keep the computer awake while a session runs.
+The notebook starts the core study from scratch in `core_study_2026-11-17/`. It creates that folder directly under `My Drive/Research/compact-ser/` on the first run and reads IEMOCAP from `datasets/iemocap/` under the same parent. Keep `TRAINING_FOLDER` the same across sessions so the run ledger can pick up the next pending run.
 
-`main_study/study_settings.json` records the training settings of the runs in the folder. If the settings in `configs/study.toml` change, the job stops before training, so that runs trained with different settings are never mixed. Rename the old folder on Drive and the next run starts a new one.
+A run interrupted by a lost runtime starts again from the beginning. A lock file stops two runtimes from training the same study at once. A lock that has not been refreshed for 10 minutes can be taken over. A runtime started from VS Code stops when the computer sleeps, so keep the computer awake while a session runs.
+
+`study_settings.json` records the training settings in the results folder. If the settings in `configs/study.toml` change, the job stops before training. Choose a new `TRAINING_FOLDER` for a new study configuration.
 
 The log shows validation UAR, and word error rate for teachers that learn transcription, at every validation pass, so a run that is not learning can be stopped early.
 
@@ -83,5 +85,5 @@ The archive is read to its end, so a truncated or damaged download is detected, 
 | `<job>/job.log` | Console output from every run of the job, each headed by its start time and commit |
 | `<job>/environment/<timestamp>/` | Session details, `nvidia-smi` output, and installed packages |
 | `<job>/<job result>.json` | Measurements written by the job |
-| `study/run_ledger.jsonl` | Start, completion, and failure of every training run |
-| `study/runs/<run id>/` | Each run's selected model and its result, including validation metrics and the commit |
+| `core_study_2026-11-17/run_ledger.jsonl` | Start, completion, and failure of every training run |
+| `core_study_2026-11-17/runs/<run id>/` | Each run's selected model and its result, including validation metrics and the commit |
