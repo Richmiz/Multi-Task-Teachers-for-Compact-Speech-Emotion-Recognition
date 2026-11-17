@@ -24,12 +24,39 @@ class RunStatus(StrEnum):
 class RunLedger:
     """Progress log stored as one JSON object per line.
 
-    A session can end while a line is being written, so a final line that cannot be parsed is
-    ignored when the ledger is read.
+    A session can end while a line is being written. Such an unfinished final line is ignored
+    when the ledger is read, and is repaired before the next line is appended, so that it never
+    ends up in the middle of the file.
     """
 
     def __init__(self, path: Path) -> None:
         self.path = path
+
+    def _repair_final_line(self) -> None:
+        """Finish or remove a final line that a stopped session left without a line break.
+
+        A final line that is a complete entry is kept and given its line break. A partial entry
+        is removed: its write never finished, so the change it recorded did not take effect.
+        """
+        if not self.path.exists():
+            return
+        data = self.path.read_bytes()
+        if not data or data.endswith(b"\n"):
+            return
+        start = data.rfind(b"\n") + 1
+        try:
+            json.loads(data[start:])
+        except ValueError:
+            with self.path.open("r+b") as stream:
+                stream.truncate(start)
+                stream.flush()
+                os.fsync(stream.fileno())
+            print(f"Removed an unfinished final line from {self.path}.", flush=True)
+            return
+        with self.path.open("ab") as stream:
+            stream.write(b"\n")
+            stream.flush()
+            os.fsync(stream.fileno())
 
     def record(self, run_id: str, status: RunStatus, **details: Any) -> None:
         """Append a status change and force it to storage.
@@ -40,6 +67,7 @@ class RunLedger:
             **details: Additional JSON-serializable fields to store.
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._repair_final_line()
         entry = {
             "run_id": run_id,
             "status": status.value,

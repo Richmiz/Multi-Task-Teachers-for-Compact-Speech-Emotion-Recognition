@@ -38,6 +38,32 @@ def test_partial_final_line_from_a_lost_session_is_ignored(tmp_path):
     assert ledger.latest_statuses() == {FIRST_RUN.run_id: RunStatus.COMPLETED}
 
 
+def test_recording_after_a_partial_line_keeps_the_ledger_readable(tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    ledger = RunLedger(path)
+    ledger.record(FIRST_RUN.run_id, RunStatus.COMPLETED)
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write('{"run_id": "partial')
+    ledger.record(SECOND_RUN.run_id, RunStatus.STARTED)
+    ledger.record(SECOND_RUN.run_id, RunStatus.COMPLETED)
+    assert ledger.latest_statuses() == {
+        FIRST_RUN.run_id: RunStatus.COMPLETED,
+        SECOND_RUN.run_id: RunStatus.COMPLETED,
+    }
+    assert "partial" not in path.read_text(encoding="utf-8")
+
+
+def test_complete_final_entry_without_a_line_break_is_kept(tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    path.write_text(f'{{"run_id": "{FIRST_RUN.run_id}", "status": "completed"}}', "utf-8")
+    ledger = RunLedger(path)
+    ledger.record(SECOND_RUN.run_id, RunStatus.STARTED)
+    assert ledger.latest_statuses() == {
+        FIRST_RUN.run_id: RunStatus.COMPLETED,
+        SECOND_RUN.run_id: RunStatus.STARTED,
+    }
+
+
 def test_damage_before_the_final_line_is_reported(tmp_path):
     path = tmp_path / "ledger.jsonl"
     path.write_text('not json\n{"run_id": "a", "status": "completed"}\n', encoding="utf-8")
