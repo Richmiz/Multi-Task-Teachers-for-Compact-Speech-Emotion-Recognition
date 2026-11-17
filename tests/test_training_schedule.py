@@ -67,6 +67,25 @@ def test_heads_train_alone_before_the_encoder(model):
     assert all(p.requires_grad for p in model.encoder.encoder.parameters())
 
 
+def test_log_reports_epochs_losses_and_time_left(model, capsys):
+    waveforms = 0.1 * torch.randn(2, 8000)
+    mask = torch.ones_like(waveforms, dtype=torch.long)
+
+    def compute_loss(_):
+        output = model(waveforms, mask)
+        return {
+            "emotion": functional.cross_entropy(output.emotion_logits, torch.tensor([0, 1]))
+        }, {}
+
+    settings = replace(SETTINGS, head_only_share=0.5, gradient_log_interval=2)
+    train_stage(model, compute_loss, itertools.repeat(None), 4, settings, updates_per_epoch=2)
+    log = capsys.readouterr().out
+    assert "4 updates of 16 utterances: 2 per epoch, about 2 epochs" in log
+    assert "update 2/4, epoch 1.0: loss" in log and "(heads only)" in log
+    assert "update 3/4, epoch 1.5: encoder training starts." in log
+    assert "update 4/4, epoch 2.0: loss" in log and "left" in log
+
+
 def test_study_folder_keeps_one_set_of_settings(tmp_path):
     design = load_study_design()
     check_study_settings(tmp_path, design)

@@ -162,6 +162,10 @@ def _training_batches(context: StudyContext, data: FoldData, run: RunSpec) -> It
     )
 
 
+def _updates_per_epoch(context: StudyContext, data: FoldData) -> int:
+    return max(len(data.training) // context.design.training.batch_size, 1)
+
+
 def _load_result(context: StudyContext, run_id: str) -> dict[str, Any]:
     path = context.run_folder(run_id) / RESULT_FILE_NAME
     if not path.exists():
@@ -271,7 +275,14 @@ def _train_teacher(context: StudyContext, run: RunSpec) -> dict[str, Any]:
             loss = transcript_loss(output, batch.transcript_targets, batch.transcript_lengths)
             return {"transcript": loss}, {}
 
-        adaptation = train_stage(model, adaptation_loss, batches, adaptation_updates, settings)
+        adaptation = train_stage(
+            model,
+            adaptation_loss,
+            batches,
+            adaptation_updates,
+            settings,
+            updates_per_epoch=_updates_per_epoch(context, data),
+        )
         details["adaptation_gradient_history"] = adaptation.gradient_history
         remaining_updates = settings.teacher_updates - adaptation_updates
         transcript_weight = speaker_weight = 0.0
@@ -330,6 +341,7 @@ def _train_teacher(context: StudyContext, run: RunSpec) -> dict[str, Any]:
         settings,
         validate,
         on_encoder_start=calibrate_auxiliary_weights if is_joint else None,
+        updates_per_epoch=_updates_per_epoch(context, data),
     )
     details["gradient_history"] = outcome.gradient_history
     return _save_run(context, run, outcome, details, started)
@@ -410,7 +422,13 @@ def _train_student(context: StudyContext, run: RunSpec) -> dict[str, Any]:
 
     batches = _training_batches(context, data, run)
     outcome = train_stage(
-        student, compute_loss, batches, settings.student_updates, settings, validate
+        student,
+        compute_loss,
+        batches,
+        settings.student_updates,
+        settings,
+        validate,
+        updates_per_epoch=_updates_per_epoch(context, data),
     )
     details = {
         "source_teacher": teacher_id,
@@ -491,6 +509,7 @@ def execute_pending_runs(
     if max_runs is not None:
         pending = pending[:max_runs]
     for position, run in enumerate(pending, start=1):
+        print(f"Run {position}/{len(pending)} {run.run_id} started.", flush=True)
         ledger.record(run.run_id, RunStatus.STARTED)
         try:
             result = execute_run(context, run)
