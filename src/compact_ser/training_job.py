@@ -1,13 +1,15 @@
 """Run the planned training with IEMOCAP restored from its stored copy.
 
     python -m compact_ser.training_job --store-dir DRIVE/datasets/iemocap --search-dir DRIVE \
-        --local-dir /content/compact-ser-data --output-dir DRIVE/study --scope core --max-runs 4
+        --local-dir /content/compact-ser-data --output-dir DRIVE/main_study --scope core \
+        --max-runs 12 --adopt-from DRIVE/study
 
 The stored study archive is copied to local disk and verified, and the four-class counts are
 checked. Pending runs are then executed in plan order. Run folders and the run ledger are written
 to the output folder, so the next session continues with the next pending run; an interrupted run
-starts again from the beginning. `--runs` restricts this session to the named planned runs. A lock
-file in the output folder stops two runtimes from training the same study at once.
+starts again from the beginning. `--runs` restricts this session to the named planned runs, and
+`--adopt-from` first moves in completed pilot teachers that match the study. A lock file in the
+output folder stops two runtimes from training the same study at once.
 """
 
 from __future__ import annotations
@@ -26,11 +28,13 @@ from pathlib import Path
 
 from compact_ser.corpora import read_iemocap
 from compact_ser.iemocap_archive import check_corpus, locate_study_store, restore_study_files
+from compact_ser.run_adoption import adopt_runs
 from compact_ser.run_ledger import RunLedger
 from compact_ser.runtime_environment import save_runtime_record
 from compact_ser.study_design import PlanScope, RunSpec, build_run_plan
 from compact_ser.study_runner import (
     LEDGER_FILE_NAME,
+    LOCK_FILE_NAME,
     add_check_options,
     build_context,
     check_study_settings,
@@ -40,7 +44,6 @@ from compact_ser.study_runner import (
 
 COMPLETION_MARKER = "TRAINING JOB COMPLETE"
 FAILURE_MARKER = "TRAINING JOB FAILED"
-LOCK_FILE_NAME = "study.lock"
 
 
 class StudyLockedError(RuntimeError):
@@ -149,6 +152,11 @@ def main(arguments: Sequence[str] | None = None) -> None:
     parser.add_argument("--scope", choices=[scope.value for scope in PlanScope], default="core")
     parser.add_argument("--runs", nargs="+", metavar="RUN_ID", help="Run only these planned runs.")
     parser.add_argument("--max-runs", type=int, help="Largest number of runs in this session.")
+    parser.add_argument(
+        "--adopt-from",
+        type=Path,
+        help="Earlier study folder whose completed, matching teachers join this study.",
+    )
     add_check_options(parser)
     options = parser.parse_args(arguments)
 
@@ -157,26 +165,27 @@ def main(arguments: Sequence[str] | None = None) -> None:
         print(f"Environment recorded in {save_runtime_record(options.output_dir)}.", flush=True)
         design = study_design(options.update_limit)
         check_study_settings(options.output_dir, design)
-        store_dir = locate_study_store(options.store_dir, options.search_dir)
-        corpus_dir = restore_study_files(store_dir, options.local_dir)
-        print(f"Four-class utterances: {check_corpus(corpus_dir)['emotions']}", flush=True)
-
-        context = build_context(
-            read_iemocap(corpus_dir, design.sessions),
-            corpus_dir,
-            options.output_dir,
-            options.update_limit,
-            options.small_model,
-        )
-        plan = select_runs(build_run_plan(context.design, PlanScope(options.scope)), options.runs)
-        ledger = RunLedger(options.output_dir / LEDGER_FILE_NAME)
-        pending = ledger.pending_runs(plan)
-        upcoming = pending[: options.max_runs] if options.max_runs is not None else pending
-        print(f"{len(pending)} of {len(plan)} selected runs are pending.", flush=True)
-        for run in upcoming:
-            print(f"  {run.run_id}", flush=True)
-
         with StudyLock(options.output_dir / LOCK_FILE_NAME):
+            if options.adopt_from is not None:
+                adopt_runs(options.adopt_from, options.output_dir, design)
+            store_dir = locate_study_store(options.store_dir, options.search_dir)
+            corpus_dir = restore_study_files(store_dir, options.local_dir)
+            print(f"Four-class utterances: {check_corpus(corpus_dir)['emotions']}", flush=True)
+
+            context = build_context(
+                read_iemocap(corpus_dir, design.sessions),
+                corpus_dir,
+                options.output_dir,
+                options.update_limit,
+                options.small_model,
+            )
+            plan = select_runs(build_run_plan(design, PlanScope(options.scope)), options.runs)
+            ledger = RunLedger(options.output_dir / LEDGER_FILE_NAME)
+            pending = ledger.pending_runs(plan)
+            upcoming = pending[: options.max_runs] if options.max_runs is not None else pending
+            print(f"{len(pending)} of {len(plan)} selected runs are pending.", flush=True)
+            for run in upcoming:
+                print(f"  {run.run_id}", flush=True)
             executed = execute_pending_runs(context, plan, options.max_runs)
         remaining = len(ledger.pending_runs(plan))
         print(f"{executed} runs executed; {remaining} selected runs still pending.", flush=True)

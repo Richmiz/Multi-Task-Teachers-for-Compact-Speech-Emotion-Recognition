@@ -50,13 +50,13 @@ def test_unknown_job_names_the_choices():
 
 def test_command_fills_places_and_keeps_user_options_last(tmp_path):
     session = ColabSession(JOBS["training"], tmp_path, REPOSITORY_ROOT, "abc123")
-    command = job_command(session, ["--max-runs", "2"])
+    command = job_command(session, ["--max-runs", "2", "--adopt-from", "{output_root}/study"])
     assert command[1:4] == ["-u", "-m", "compact_ser.training_job"]
     assert command[command.index("--store-dir") + 1] == f"{tmp_path}/datasets/iemocap"
     assert command[command.index("--search-dir") + 1] == str(DRIVE_ROOT)
     assert command[command.index("--local-dir") + 1] == str(LOCAL_DATA_DIR)
-    assert command[command.index("--output-dir") + 1] == str(tmp_path / "study")
-    assert command[-2:] == ["--max-runs", "2"]
+    assert command[command.index("--output-dir") + 1] == str(tmp_path / "main_study")
+    assert command[-4:] == ["--max-runs", "2", "--adopt-from", f"{tmp_path}/study"]
 
 
 def test_job_runs_in_the_background_and_its_log_is_followed(tmp_path, capsys):

@@ -225,7 +225,7 @@ def run_check(
     print(f"Runtime: {json.dumps(runtime, sort_keys=True)}", flush=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    torch.manual_seed(design.tuning_seeds[0])
+    torch.manual_seed(design.seeds[0])
     start = time.perf_counter()
     if use_small_model:
         encoder = Wav2Vec2Model(small_encoder_config())

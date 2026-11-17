@@ -29,19 +29,22 @@ Colab runs only code that has been pushed, so every result on Drive can be trace
 | `runtime-check` | Records the environment, loads the pinned checkpoint, and measures training updates on synthetic audio | GPU | `runtime_check/` |
 | `iemocap-store` | Downloads the licensed IEMOCAP archive once, keeps only the files the study uses, checks them, and saves the verified copy to Drive | CPU | `datasets/iemocap/`, `iemocap_store/` |
 | `iemocap-check` | Copies the stored copy from Drive to the runtime, verifies it, and checks the four-class counts | CPU | `iemocap_check/` |
-| `training` | Restores IEMOCAP the same way, then executes the next pending planned runs | GPU | `study/` |
+| `training` | Restores IEMOCAP the same way, then executes the next pending planned runs | GPU | `main_study/` |
 
 `training` takes these options:
 
 | Option | Effect |
 | --- | --- |
-| `--scope pilot`, `core`, or `full` | Plan to follow: `pilot` is the validation pilot (teacher tuning and pilot students), `core` adds the primary comparison, and `full` adds every other run |
+| `--scope core` or `full` | Plan to follow: `core` is the primary comparison and its controls, and `full` adds the other teacher objectives and four-layer students |
 | `--max-runs N` | Execute at most `N` runs in this session |
 | `--runs RUN_ID ...` | Execute only the named planned runs, in plan order |
+| `--adopt-from FOLDER` | First move in completed teachers from an earlier study folder whose seed, auxiliary weight, and teacher training settings match the study |
 
-The run ledger in `study/` records each run's progress, so the next session continues with the next pending run. A run interrupted by a lost runtime starts again from the beginning. A lock file stops two runtimes from training the same study at once; a lock that has not been refreshed for 10 minutes is taken over.
+Options may use `{output_root}` for the project's Drive folder, for example `--adopt-from {output_root}/study`. Each adopted run keeps its model and result, and its result and ledger entry record where it came from. Adoption refuses a folder in which a runtime is still training, or whose teachers were trained with other settings.
 
-`study/study_settings.json` records the training settings of the runs in the folder. If the settings in `configs/study.toml` change, the job stops before training, so that runs trained with different settings are never mixed. Rename the old folder on Drive, for example to `pilot-1`, and the next run starts a new `study/` folder.
+The run ledger in `main_study/` records each run's progress, so the next session continues with the next pending run. A run interrupted by a lost runtime starts again from the beginning. A lock file stops two runtimes from training the same study at once; a lock that has not been refreshed for 10 minutes is taken over. A runtime started from VS Code stops when the computer sleeps, so keep the computer awake while a session runs.
+
+`main_study/study_settings.json` records the training settings of the runs in the folder. If the settings in `configs/study.toml` change, the job stops before training, so that runs trained with different settings are never mixed. Rename the old folder on Drive and the next run starts a new one.
 
 The log shows validation UAR, and word error rate for teachers that learn transcription, at every validation pass, so a run that is not learning can be stopped early.
 

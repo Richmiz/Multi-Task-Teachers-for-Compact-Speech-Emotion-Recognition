@@ -60,7 +60,7 @@ def test_job_restores_the_corpus_and_runs_the_next_pending_run(
     monkeypatch.setenv("COMPACT_SER_CODE_COMMIT", "abc123")
     main(job_arguments(store_dir, tmp_path, "--max-runs", "1"))
     output = capsys.readouterr().out
-    assert "1 runs executed; 174 selected runs still pending." in output
+    assert "1 runs executed; 104 selected runs still pending." in output
     assert COMPLETION_MARKER in output
 
     study = tmp_path / "drive" / "study"

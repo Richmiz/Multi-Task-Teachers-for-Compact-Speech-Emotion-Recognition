@@ -99,7 +99,7 @@ JOBS = {
     ),
     "training": ColabJob(
         module="compact_ser.training_job",
-        folder="study",
+        folder="main_study",
         completion_marker="TRAINING JOB COMPLETE",
         failure_marker="TRAINING JOB FAILED",
         arguments=(
@@ -235,26 +235,32 @@ def job_command(session: ColabSession, options: Sequence[str] = ()) -> list[str]
 
     Args:
         session: The prepared session.
-        options: Options added after the job's own arguments.
+        options: Options added after the job's own arguments. They may use the same places as
+            the job's arguments, such as `{output_root}`.
 
     Returns:
         The command, with the job's output folder as `--output-dir`.
     """
     places = {
-        "output_root": session.output_root,
-        "drive_root": DRIVE_ROOT,
-        "local_data": LOCAL_DATA_DIR,
+        "{output_root}": session.output_root,
+        "{drive_root}": DRIVE_ROOT,
+        "{local_data}": LOCAL_DATA_DIR,
     }
-    arguments = [argument.format(**places) for argument in session.job.arguments]
+
+    def fill(value: str) -> str:
+        for place, path in places.items():
+            value = value.replace(place, str(path))
+        return value
+
     return [
         sys.executable,
         "-u",
         "-m",
         session.job.module,
-        *arguments,
+        *map(fill, session.job.arguments),
         "--output-dir",
         str(session.job_root),
-        *options,
+        *map(fill, options),
     ]
 
 

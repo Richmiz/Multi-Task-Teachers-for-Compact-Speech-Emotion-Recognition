@@ -40,7 +40,7 @@ def design():
         calibration_batches=1,
         head_only_share=0.25,
     )
-    return replace(base, confirmatory_seeds=base.confirmatory_seeds[:1], training=training)
+    return replace(base, seeds=base.seeds[:1], training=training)
 
 
 @pytest.fixture(scope="module")
@@ -83,7 +83,7 @@ def read_result(context, run):
 
 def test_full_plan_for_one_fold_runs_without_reading_the_test_session(completed_study):
     _, plan, executed = completed_study
-    assert executed == len(plan) == 51
+    assert executed == len(plan) == 19
 
 
 def test_every_run_saves_a_model_and_result_and_is_recorded(completed_study):
@@ -113,10 +113,8 @@ def test_completed_runs_are_skipped_on_restart(completed_study):
 )
 def test_each_objective_trains_only_its_own_tasks(completed_study, objective, expected_terms):
     context, plan, _ = completed_study
-    teachers = [
-        run for run in plan if run.kind is RunKind.TEACHER_TUNING and run.objective is objective
-    ]
-    assert len(teachers) == 3
+    teachers = [run for run in plan if run.kind is RunKind.TEACHER and run.objective is objective]
+    assert len(teachers) == 1
     for run in teachers:
         entry = read_result(context, run)["gradient_history"][0]
         shares = {name for name in entry if name.endswith("_gradient_share")}
@@ -125,33 +123,18 @@ def test_each_objective_trains_only_its_own_tasks(completed_study, objective, ex
             assert "speaker_training_accuracy" in entry
 
 
-def test_sequential_teacher_splits_updates_between_stages(completed_study):
+def test_sequential_teacher_splits_updates_between_stages(completed_study, design):
     context, plan, _ = completed_study
-    runs = [
+    run = next(
         run
         for run in plan
-        if run.kind is RunKind.TEACHER_TUNING and run.objective is TeacherObjective.ASR_THEN_SER
-    ]
-    results = [read_result(context, run) for run in runs]
-    assert [result["asr_update_share"] for result in results] == [0.25, 0.5, 0.75]
-    assert [result["validation_history"][-1]["update"] for result in results] == [3, 2, 1]
-    entry = results[0]["adaptation_gradient_history"][0]
-    assert entry["transcript_gradient_share"] == pytest.approx(1.0)
-
-
-def test_confirmatory_teacher_uses_the_best_tuning_candidate(completed_study):
-    context, plan, _ = completed_study
-    objective = TeacherObjective.SER_ASR_SID
-    tuning = [
-        read_result(context, run)
-        for run in plan
-        if run.kind is RunKind.TEACHER_TUNING and run.objective is objective
-    ]
-    scores = [result["validation_metrics"]["uar"] for result in tuning]
-    teacher = next(
-        run for run in plan if run.kind is RunKind.TEACHER and run.objective is objective
+        if run.kind is RunKind.TEACHER and run.objective is TeacherObjective.ASR_THEN_SER
     )
-    assert read_result(context, teacher)["candidate"] == scores.index(max(scores))
+    result = read_result(context, run)
+    assert result["asr_update_share"] == design.asr_update_share
+    assert result["validation_history"][-1]["update"] == 2
+    entry = result["adaptation_gradient_history"][0]
+    assert entry["transcript_gradient_share"] == pytest.approx(1.0)
 
 
 def test_command_line_run_prints_the_completion_marker(manifest, iemocap_root, tmp_path, capsys):
@@ -186,7 +169,7 @@ def test_multitask_teacher_learns_six_training_speakers_and_reports_transcriptio
     result = read_result(context, run)
     assert result["architecture"]["num_speakers"] == 6
     assert "word_error_rate" in result["validation_metrics"]
-    assert "auxiliary_loss_scale" in result
+    assert result["auxiliary_loss_scale"] == 1.0
 
 
 def test_student_types_use_the_expected_teacher_and_losses(completed_study):
